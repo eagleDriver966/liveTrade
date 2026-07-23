@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "app_version": "2.0.0",
+  "parser_version": "hdb-parser-1",
+  "run_id": "run_20260202_090001",
+  "trading_date": "2026-02-02",
+  "session": "NHP",
+  "panel_position": 1,
+  "boundary_date": "2026-02-01",
+  "created_at": "2026-07-23T02:53:58.836223+00:00",
+  "updated_at": "2026-07-23T02:54:01.928092+00:00",
+  "status": "VERIFIED",
+  "completion_reason": "explicit_no_more_history",
+  "completion_signals": [
+    "explicit_no_more_history",
+    "no_new_page_after_more"
+  ],
+  "parts": [
+    {
+      "part_number": 1,
+      "filename": "NHP_2026-02-02_part_001.csv",
+      "sha256": "1c9418bc3f70716076d0b3e321b628c18e9d646ad600b16cf440f18b09d2855f",
+      "row_count": 2,
+      "newest_timestamp": "2026-02-02T15:59:00-05:00",
+      "oldest_timestamp": "2026-02-02T15:00:00-05:00",
+      "first_symbol": "AAPL",
+      "last_symbol": "MSFT",
+      "page_fingerprint": "61e0179834d3c1ae391a1c98f749fbdbdcea610f0e519ebfd24a0d03d87ed006",
+      "status": "VALIDATED",
+      "validated_at": "2026-07-23T02:54:00.423606+00:00",
+      "notes": {}
+    },
+    {
+      "part_number": 2,
+      "filename": "NHP_2026-02-02_part_002.csv",
+      "sha256": "3e2e89c86ac5ea31d8940ac4f8827c90ff630e2c44faca8cc85d47a44ce179a2",
+      "row_count": 2,
+      "newest_timestamp": "2026-02-02T11:00:00-05:00",
+      "oldest_timestamp": "2026-02-02T09:30:00-05:00",
+      "first_symbol": "TSLA",
+      "last_symbol": "NVDA",
+      "page_fingerprint": "5b8da9511256a4b3fb9997b911eb7f0703c93f31715911889eb85698b8ed926b",
+      "status": "VALIDATED",
+      "validated_at": "2026-07-23T02:54:01.927062+00:00",
+      "notes": {}
+    }
+  ]
+}
