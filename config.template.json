@@ -1,0 +1,72 @@
+{
+  "timezone": "America/New_York",
+  "exchange_calendar": "XNYS",
+  "history_boundary_date": "2026-02-01",
+  "sessions": {
+    "HPRE": {
+      "start": "04:00:00",
+      "end": "09:29:59"
+    },
+    "NHP": {
+      "start": "09:30:00",
+      "end": "market_close"
+    },
+    "HPOST": {
+      "start": "market_close",
+      "end": "20:00:00"
+    }
+  },
+  "panel_positions": {
+    "HPRE": null,
+    "NHP": null,
+    "HPOST": null
+  },
+  "panel_signatures": {
+    "HPRE": null,
+    "NHP": null,
+    "HPOST": null
+  },
+  "paths": {
+    "database": "trade_ideas.db",
+    "exports_root": "historical_exports",
+    "logs_root": "logs",
+    "screenshots_root": "logs/screenshots",
+    "backups_root": "backups",
+    "diagnostics_root": "diagnostics"
+  },
+  "collection": {
+    "current_day_safety_delay_seconds": 3600,
+    "min_conclusive_rows": 1000,
+    "max_pages_per_session": 500,
+    "min_completion_signals": 2
+  },
+  "timeouts": {
+    "history_load_seconds": 30,
+    "save_as_dialog_seconds": 20,
+    "file_settle_seconds": 10,
+    "more_load_seconds": 30,
+    "file_settle_poll_interval": 0.5
+  },
+  "automation": {
+    "backend": "pywinauto",
+    "ui_backend": "uia",
+    "app_title_re": ".*Trade Ideas.*",
+    "allow_coordinate_fallback": false,
+    "coordinate_fallbacks": {},
+    "screenshot_before_click": true,
+    "selectors": {
+      "panel_menu_path": null,
+      "history_menu_path": null,
+      "history_date_edit": null,
+      "history_grid": null,
+      "more_button": null,
+      "no_more_history_text": null,
+      "file_menu_path": "File",
+      "save_contents_menu_path": "File->Save Contents"
+    }
+  },
+  "safety": {
+    "trading_actions_enabled": false,
+    "auto_approve_overwrite": false
+  }
+}
