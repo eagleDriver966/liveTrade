@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Runtime artifacts (never commit collected data / DBs / logs)
+trade_ideas.db
+trade_ideas.db-wal
+trade_ideas.db-shm
+*.db
+*.db-wal
+*.db-shm
+historical_exports/
+logs/
+backups/
+diagnostics/
+
+# Local config (may contain machine-specific selectors/paths)
+config.json
+
+# OS
+.DS_Store
+Thumbs.db

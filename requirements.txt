@@ -1,0 +1,13 @@
+# Core (cross-platform) - required everywhere, including tests/CI on Linux.
+pandas_market_calendars>=4.4.0
+tzdata>=2024.1            # ensures IANA tz data on Windows (zoneinfo)
+
+# Testing.
+pytest>=8.0.0
+
+# Windows-only automation (install on the Windows collection machine).
+# These are imported lazily; the core app + tests run without them.
+pywinauto>=0.6.8 ; sys_platform == "win32"
+pywin32>=306 ; sys_platform == "win32"
+comtypes>=1.2.0 ; sys_platform == "win32"
+Pillow>=10.0.0 ; sys_platform == "win32"
