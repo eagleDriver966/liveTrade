@@ -34,12 +34,59 @@ More on unvalidated data).
 **View Collection Status** shows per-table counts, VERIFIED dates, and the
 row-count reconciliation (exported part rows vs source occurrences + rejected).
 
+## Backend status (shown prominently at startup)
+
+The app detects the OS and backend and displays exactly one of:
+
+* `REAL WINDOWS BACKEND READY` - on Windows, pywinauto imported, Trade Ideas
+  window found and connected.
+* `MOCK TEST BACKEND` - the mock simulator (tests/diagnostics only).
+* `WINDOWS BACKEND ERROR` - the real backend was requested but could not
+  initialize; the **exact reason** is shown and the app stays blocked.
+
+The app never silently falls back from the real backend to mock.
+
+```bash
+python Hdb.py --config config.json backend-status
+```
+
 ## Mock backend is blocked for production
 
-When `automation.backend = "mock"`, all collection actions are **blocked** and
-refuse to write to the real database (the CLI exits with code 3; the GUI shows a
-blocked dialog). The mock backend is only for diagnostics and the automated
-tests. Set `automation.backend = "pywinauto"` on the Windows machine to collect.
+When `automation.backend = "mock"`, all collection **and** the real diagnostic
+export tests are blocked and refuse to write to the real database (the CLI exits
+with code 3; the GUI shows a blocked dialog). Mock uses a **separate test
+database and export directory** (suffixes `.mocktest.db` / `_mocktest`) so mock
+data never touches production. Set `automation.backend = "pywinauto"` on the
+Windows machine to collect.
+
+## Verification gates (collection stays blocked until all pass)
+
+`Collect Single Date`, `Collect Date Range` and `Resume Incomplete Run` are
+blocked until every gate passes:
+
+`real_backend_initialized`, `panels_assigned`, `panels_verified`,
+`history_selector_verified`, `save_contents_verified`, `save_as_verified`,
+`one_page_exported`, `one_more_verified`, `one_session_reconciled`.
+
+```bash
+python Hdb.py --config config.json gates          # see gate status
+```
+
+### Gated diagnostic sequence (run in order on Windows)
+
+```bash
+python Hdb.py --config config.json backend-status              # REAL WINDOWS BACKEND READY
+python Hdb.py --config config.json diagnostics                 # discover menus/controls
+python Hdb.py --config config.json assign HPRE <pos>           # assign real positions
+python Hdb.py --config config.json assign NHP  <pos>
+python Hdb.py --config config.json assign HPOST <pos>
+python Hdb.py --config config.json verify-panel NHP --confirm  # activate + visually confirm each
+python Hdb.py --config config.json test-one-page 2026-02-02 NHP  # export ONE page, no More, no import
+python Hdb.py --config config.json approve-page                 # import that page after you review it
+python Hdb.py --config config.json test-one-more 2026-02-02 NHP  # ONE More -> part_002, then stop
+# one full session reconcile (later objective) sets the final gate; only then
+# are Collect Single/Date Range/Resume unblocked.
+```
 
 ## CLI
 

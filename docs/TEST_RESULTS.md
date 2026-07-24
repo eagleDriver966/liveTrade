@@ -3,23 +3,53 @@
 Command: `pytest -q` (Python 3.12.3, Linux)
 
 ```
-........................................................................ [ 82%]
-...............                                                          [100%]
-87 passed in 29.41s
+........................................................................ [ 68%]
+.................................                                        [100%]
+105 passed in 34.12s
 ```
 
-## Demo: `python examples/demo_collection.py`
+## Diagnostic demo: `python examples/demo_diagnostic.py`
 
 ```
-1. MIGRATE:
+1. BACKEND STATUS
+   real (this OS): WINDOWS BACKEND ERROR
+   mock         : MOCK TEST BACKEND
+
+2. TEST ONE PAGE EXPORT (no More, no import)
+   filename: NHP_2026-02-02_part_001.csv
+   file_size: 192
+   parsed_row_count: 2
+   newest_timestamp: 2026-02-02T15:59:00-05:00
+   oldest_timestamp: 2026-02-02T15:00:00-05:00
+   alert_types: ['High']
+   symbols_sample: ['AAPL', 'MSFT']
+   symbol_count: 2
+   timestamp_parse_rate: 1.0
+   session_validation.ok: True
+
+3. TEST ONE MORE TRANSITION (part_002, then stop)
+   part_002: NHP_2026-02-02_part_002.csv
+   page_changed=True moved_backward=True new_fingerprints=2 ok=True
+   first oldest=2026-02-02T15:00:00-05:00 -> second oldest=2026-02-02T09:30:00-05:00
+
+4. GATES (simulated after successful diagnostics)
+   passed so far: ['real_backend_initialized', 'panels_assigned', 'panels_verified', 'history_selector_verified', 'save_contents_verified', 'save_as_verified', 'one_page_exported', 'one_more_verified']
+   still blocking collection: ['one_session_reconciled']
+
+RESULT: PASS
+```
+
+## Collection demo: `python examples/demo_collection.py`
+
+```
    wal=wal integrity_ok=True applied=[1, 2] version=2
 
 2. DIAGNOSTICS:
-   report=diagnostic_20260724_071339.json panels_found=3
+   report=diagnostic_20260724_080722.json panels_found=3
    panels_assigned=True positions={'HPRE': 0, 'NHP': 1, 'HPOST': 2}
 
 3. COLLECT DATE RANGE (2026-02-03 -> 2026-02-02):
-   run_id=run_20260724_071339 days=2
+   run_id=run_20260724_080722 days=2
 
 4. VERIFY:
    integrity_ok=True

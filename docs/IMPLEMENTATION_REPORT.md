@@ -23,8 +23,25 @@ Windows) and a deterministic mock backend used by the tests.
 | 9 | All three sessions for one date | Done (`collect_date`) |
 | 10 | Date-range collection | Done (`collect_range`) |
 | 11 | Restart + recovery | Done (`reconcile.resume_plan`, new-run-dir policy) |
-| 12 | Tests + reconciliation reports | Done (83 tests, `reconcile.py`) |
+| 12 | Tests + reconciliation reports | Done (105 tests, `reconcile.py`) |
 | 13 | Unattended operation | **Gated** on Windows selector verification |
+
+### Real Windows backend + gated diagnostics (current objective)
+
+* OS detection + backend status (`REAL WINDOWS BACKEND READY` / `MOCK TEST
+  BACKEND` / `WINDOWS BACKEND ERROR`) with the exact failure reason; no silent
+  fallback to mock (`hdb/backend_status.py`, `app.backend_status`).
+* Hardened `pywinauto` backend `connect()` (OS guard, missing-deps, and
+  Trade-Ideas-not-found errors) and an enriched `discover()` selector report.
+* Panel verification step (activate + role/position + screenshot + control
+  signature + operator confirmation) via `app.verify_panel`.
+* Gated diagnostics: `test-one-page` (export one page, no More, no import) and
+  `test-one-more` (one More -> part_002, then stop) in `hdb/diagnostic_tests.py`.
+* Verification gates (`hdb/gates.py`) block `Collect Single Date`, `Collect Date
+  Range`, and `Resume Incomplete Run` until all pass.
+* Mock isolation: mock uses a separate `.mocktest` database and `_mocktest`
+  export directory; production collection and the real diagnostic exports are
+  blocked when `backend=mock`.
 
 ## Key design decisions
 

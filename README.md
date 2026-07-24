@@ -72,19 +72,38 @@ hdb/
     pywinauto_backend.py   Real Windows backend (lazy import; verify on Windows)
 ```
 
-## Quick start
+## Backend status
+
+At startup the app detects the OS and backend and shows exactly one of:
+
+* `REAL WINDOWS BACKEND READY` - on Windows, pywinauto imported, Trade Ideas
+  connected.
+* `MOCK TEST BACKEND` - the simulator (tests/diagnostics only; production
+  blocked; uses a separate `.mocktest` DB and `_mocktest` export dir).
+* `WINDOWS BACKEND ERROR` - real backend requested but could not initialize; the
+  exact reason is shown and the app stays blocked (never silently falls back).
+
+## Gated workflow (real Windows)
+
+Collection stays blocked until every verification gate passes. The intended
+order on the Windows machine:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp config.template.json config.json               # then edit paths/selectors
-
-python Hdb.py --config config.json migrate        # backup + migrate DB
-python Hdb.py --config config.json diagnostics    # discover Trade Ideas UI
-python Hdb.py --config config.json gui            # or use the GUI
+python Hdb.py --config config.json backend-status              # REAL WINDOWS BACKEND READY
+python Hdb.py --config config.json migrate                     # backup + migrate DB
+python Hdb.py --config config.json diagnostics                 # discover menus/controls + selector report
+python Hdb.py --config config.json assign HPRE <pos>           # assign real tab positions (do not assume 0/1/2)
+python Hdb.py --config config.json verify-panel NHP --confirm  # activate + visually confirm each panel
+python Hdb.py --config config.json test-one-page 2026-02-02 NHP  # export ONE page (no More, no import)
+python Hdb.py --config config.json approve-page                 # import that page after you review it
+python Hdb.py --config config.json test-one-more 2026-02-02 NHP  # ONE More -> part_002, then stop
+python Hdb.py --config config.json gates                        # see remaining gates
+python Hdb.py --config config.json gui                          # or use the GUI
 ```
 
-See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) and
+`Collect Single Date` / `Collect Date Range` / `Resume Incomplete Run` remain
+blocked until all gates (including one full reconciled session) pass. See
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md) and
 [`docs/OPERATING.md`](docs/OPERATING.md).
 
 ## Database
