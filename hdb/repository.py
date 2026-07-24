@@ -25,20 +25,22 @@ def create_run(
     boundary_date: date | None,
     start_date: date | None,
     end_date: date | None,
+    backend: str | None = None,
     notes: dict[str, Any] | None = None,
 ) -> None:
     now = _utc_iso()
     conn.execute(
         """INSERT OR IGNORE INTO collection_runs
-           (run_id, mode, boundary_date, start_date, end_date, status,
+           (run_id, mode, boundary_date, start_date, end_date, backend, status,
             created_at, updated_at, notes)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             run_id,
             mode,
             boundary_date.isoformat() if boundary_date else None,
             start_date.isoformat() if start_date else None,
             end_date.isoformat() if end_date else None,
+            backend,
             str(Status.COLLECTING),
             now,
             now,
@@ -52,20 +54,6 @@ def set_run_status(conn: sqlite3.Connection, run_id: str, status: Status) -> Non
     conn.execute(
         "UPDATE collection_runs SET status=?, updated_at=? WHERE run_id=?",
         (str(status), _utc_iso(), run_id),
-    )
-    conn.commit()
-
-
-def upsert_day(
-    conn: sqlite3.Connection, run_id: str, trading_date: date, status: Status
-) -> None:
-    now = _utc_iso()
-    conn.execute(
-        """INSERT INTO collection_days (run_id, trading_date, status, created_at, updated_at)
-           VALUES (?,?,?,?,?)
-           ON CONFLICT(run_id, trading_date)
-           DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at""",
-        (run_id, trading_date.isoformat(), str(status), now, now),
     )
     conn.commit()
 

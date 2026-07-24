@@ -1,12 +1,16 @@
 """Transactional, versioned SQLite migrations.
 
-* v1 establishes the legacy baseline (``alerts_flat``) if it does not exist, so
-  a brand-new database is compatible with the historical importer while an
-  existing database keeps its data untouched.
-* v2 adds the historical-collection tables and source-lineage tables.
+Scope (intentionally minimal):
+
+* v1 - establish/preserve the legacy ``alerts_flat`` table (the alert store).
+* v2 - add ONLY the collection-tracking tables required to build and expand the
+  database safely: ``collection_runs``, ``collection_sessions``,
+  ``history_export_parts``, ``alert_sources``, ``rejected_rows``.  It also adds a
+  ``session`` column to ``alerts_flat`` if missing (never dropping data).
 
 Each migration runs inside a transaction and records a row in
-``schema_versions``.  Existing records are never deleted.
+``schema_versions``.  Existing records are never deleted; an existing
+``alerts_flat`` is never altered destructively.
 """
 
 from __future__ import annotations
@@ -51,14 +55,16 @@ def _record_version(conn: sqlite3.Connection, version: int, description: str) ->
     )
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {c[1] for c in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 # -- migration bodies --------------------------------------------------------
 def _migration_1(conn: sqlite3.Connection) -> None:
-    """Legacy baseline: preserve/establish alerts_flat.
+    """Legacy baseline: preserve/establish alerts_flat (the alert store).
 
-    If ``alerts_flat`` already exists (from the original app) it is left
-    untouched - we never alter or drop it.  Indexes are only created on columns
-    that actually exist, so a legacy table with a different shape does not break
-    the migration (schema-drift safe).
+    If ``alerts_flat`` already exists it is left untouched.  Indexes are only
+    created on columns that exist (schema-drift safe).
     """
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='alerts_flat'"
@@ -75,13 +81,15 @@ def _migration_1(conn: sqlite3.Connection) -> None:
                 alert_count INTEGER,
                 volume REAL,
                 trading_date TEXT,
+                session TEXT,
                 fingerprint TEXT,
+                fingerprint_version TEXT,
                 source_file TEXT,
                 imported_at TEXT
             )
             """
         )
-    columns = {c[1] for c in conn.execute("PRAGMA table_info(alerts_flat)").fetchall()}
+    columns = _table_columns(conn, "alerts_flat")
     if "fingerprint" in columns:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_alerts_flat_fp ON alerts_flat(fingerprint)"
@@ -93,7 +101,25 @@ def _migration_1(conn: sqlite3.Connection) -> None:
 
 
 def _migration_2(conn: sqlite3.Connection) -> None:
-    """Historical-collection + lineage tables."""
+    """Add the minimal collection-tracking tables (and alerts_flat.session)."""
+    # Ensure alerts_flat has the columns the importer needs, without dropping
+    # anything on a pre-existing legacy table.
+    columns = _table_columns(conn, "alerts_flat")
+    for col, decl in (
+        ("session", "TEXT"),
+        ("fingerprint", "TEXT"),
+        ("fingerprint_version", "TEXT"),
+        ("alert_count", "INTEGER"),
+        ("volume", "REAL"),
+        ("source_file", "TEXT"),
+        ("imported_at", "TEXT"),
+    ):
+        if col not in columns:
+            conn.execute(f"ALTER TABLE alerts_flat ADD COLUMN {col} {decl}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alerts_flat_fp ON alerts_flat(fingerprint)"
+    )
+
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS collection_runs (
@@ -102,20 +128,11 @@ def _migration_2(conn: sqlite3.Connection) -> None:
             boundary_date TEXT,
             start_date TEXT,
             end_date TEXT,
+            backend TEXT,
             status TEXT NOT NULL DEFAULT 'PENDING',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             notes TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS collection_days (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL REFERENCES collection_runs(run_id),
-            trading_date TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'PENDING',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(run_id, trading_date)
         );
 
         CREATE TABLE IF NOT EXISTS collection_sessions (
@@ -133,6 +150,7 @@ def _migration_2(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL,
             UNIQUE(run_id, trading_date, session, run_dir)
         );
+        CREATE INDEX IF NOT EXISTS idx_sessions_date ON collection_sessions(trading_date, session);
 
         CREATE TABLE IF NOT EXISTS history_export_parts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,52 +177,10 @@ def _migration_2(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_parts_sha ON history_export_parts(sha256);
         CREATE INDEX IF NOT EXISTS idx_parts_pagefp ON history_export_parts(page_fingerprint);
 
-        CREATE TABLE IF NOT EXISTS alerts_normalized (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_fingerprint TEXT NOT NULL UNIQUE,
-            fingerprint_version TEXT NOT NULL,
-            trading_date TEXT,
-            alert_timestamp TEXT,
-            alert_type TEXT,
-            symbol TEXT,
-            price_norm REAL,
-            count_norm INTEGER,
-            volume_norm REAL,
-            source_session TEXT,
-            panel_role TEXT,
-            event_id TEXT,
-            first_seen_run_id TEXT,
-            first_seen_at TEXT,
-            occurrence_count INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_norm_date ON alerts_normalized(trading_date);
-        CREATE INDEX IF NOT EXISTS idx_norm_symbol ON alerts_normalized(symbol);
-
-        CREATE TABLE IF NOT EXISTS alerts_raw (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL REFERENCES collection_runs(run_id),
-            trading_date TEXT NOT NULL,
-            session TEXT NOT NULL,
-            panel_position TEXT,
-            source_filename TEXT NOT NULL,
-            source_part_number INTEGER NOT NULL,
-            source_row_number INTEGER NOT NULL,
-            raw_json TEXT NOT NULL,
-            parser_version TEXT NOT NULL,
-            import_timestamp TEXT NOT NULL,
-            normalization_status TEXT NOT NULL DEFAULT 'PENDING',
-            event_fingerprint TEXT,
-            fingerprint_version TEXT,
-            normalized_id INTEGER REFERENCES alerts_normalized(id),
-            UNIQUE(run_id, trading_date, session, source_filename, source_row_number)
-        );
-        CREATE INDEX IF NOT EXISTS idx_raw_fp ON alerts_raw(event_fingerprint);
-        CREATE INDEX IF NOT EXISTS idx_raw_norm ON alerts_raw(normalized_id);
-
         CREATE TABLE IF NOT EXISTS alert_sources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            normalized_id INTEGER NOT NULL REFERENCES alerts_normalized(id),
-            raw_id INTEGER NOT NULL REFERENCES alerts_raw(id),
+            alert_flat_id INTEGER NOT NULL REFERENCES alerts_flat(id),
+            fingerprint TEXT NOT NULL,
             run_id TEXT NOT NULL,
             trading_date TEXT NOT NULL,
             session TEXT NOT NULL,
@@ -213,9 +189,10 @@ def _migration_2(conn: sqlite3.Connection) -> None:
             source_part_number INTEGER NOT NULL,
             source_row_number INTEGER NOT NULL,
             created_at TEXT NOT NULL,
-            UNIQUE(normalized_id, source_filename, source_row_number)
+            UNIQUE(run_id, source_filename, source_row_number)
         );
-        CREATE INDEX IF NOT EXISTS idx_sources_norm ON alert_sources(normalized_id);
+        CREATE INDEX IF NOT EXISTS idx_sources_alert ON alert_sources(alert_flat_id);
+        CREATE INDEX IF NOT EXISTS idx_sources_fp ON alert_sources(fingerprint);
 
         CREATE TABLE IF NOT EXISTS rejected_rows (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,7 +212,7 @@ def _migration_2(conn: sqlite3.Connection) -> None:
 
 MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     1: ("legacy baseline: alerts_flat", _migration_1),
-    2: ("historical collection + lineage tables", _migration_2),
+    2: ("collection tracking tables", _migration_2),
 }
 
 
@@ -244,10 +221,7 @@ def migrate(
     target_version: int = SCHEMA_VERSION,
     logger=None,
 ) -> list[int]:
-    """Apply pending migrations up to ``target_version`` transactionally.
-
-    Returns the list of versions applied.
-    """
+    """Apply pending migrations up to ``target_version`` transactionally."""
     ensure_schema_versions_table(conn)
     applied: list[int] = []
     start = current_version(conn)
@@ -260,9 +234,7 @@ def migrate(
             _record_version(conn, version, description)
         applied.append(version)
         if logger:
-            logger.info(
-                "migration_applied", version=version, description=description
-            )
+            logger.info("migration_applied", version=version, description=description)
     return applied
 
 
@@ -272,10 +244,7 @@ def run_full_migration(
     logger=None,
     target_version: int = SCHEMA_VERSION,
 ) -> dict:
-    """End-to-end safe migration: backup, WAL, integrity check, migrate.
-
-    Returns a summary dict for reporting.
-    """
+    """End-to-end safe migration: backup, WAL, integrity check, migrate."""
     summary: dict = {
         "db_path": db_path,
         "backup_path": None,
@@ -300,7 +269,6 @@ def run_full_migration(
         summary["integrity_ok"] = ok
         summary["integrity_messages"] = messages
         if not ok:
-            # Do not proceed with a corrupt database.
             if logger:
                 logger.error("integrity_check_failed", messages=messages)
             raise RuntimeError(f"integrity_check failed: {messages}")

@@ -54,10 +54,10 @@ def verify_collection(conn) -> dict[str, Any]:
         "counts": {},
         "dates": {},
         "verified_dates": [],
+        "row_count_reconciliation": {},
     }
     for table in (
-        "collection_runs", "collection_days", "collection_sessions",
-        "history_export_parts", "alerts_raw", "alerts_normalized",
+        "collection_runs", "collection_sessions", "history_export_parts",
         "alert_sources", "rejected_rows", "alerts_flat",
     ):
         summary["counts"][table] = dbmod.row_count(conn, table)
@@ -81,6 +81,24 @@ def verify_collection(conn) -> dict[str, Any]:
             done = False
         if done:
             summary["verified_dates"].append(d)
+
+    # Reconcile row counts: each exported *data* row becomes either a source
+    # occurrence or a data-level rejected row.  (Parse-time empty rows are not
+    # counted in a part's row_count, so they are excluded here.)
+    part_rows = conn.execute(
+        "SELECT COALESCE(SUM(row_count),0) FROM history_export_parts"
+    ).fetchone()[0]
+    source_rows = dbmod.row_count(conn, "alert_sources")
+    data_rejected = conn.execute(
+        "SELECT COUNT(*) FROM rejected_rows WHERE reason NOT IN ('empty_row','parse_rejected')"
+    ).fetchone()[0]
+    summary["row_count_reconciliation"] = {
+        "exported_part_rows": part_rows,
+        "source_occurrences": source_rows,
+        "data_rejected_rows": data_rejected,
+        "total_rejected_rows": dbmod.row_count(conn, "rejected_rows"),
+        "balanced": (source_rows + data_rejected) == part_rows,
+    }
     return summary
 
 
@@ -141,21 +159,15 @@ def _check_manifest(manifest_path: str, csvs: list[str], report: ReconcileReport
 
 
 def find_incomplete(conn) -> dict[str, Any]:
-    """Return runs/days/sessions that are not in a completed state (for resume)."""
+    """Return sessions that are not in a completed state (for resume)."""
     incomplete_sessions = conn.execute(
         """SELECT run_id, trading_date, session, status, run_dir, part_count
            FROM collection_sessions
            WHERE status NOT IN ('VERIFIED','EMPTY_VERIFIED')
            ORDER BY trading_date DESC"""
     ).fetchall()
-    incomplete_days = conn.execute(
-        """SELECT run_id, trading_date, status FROM collection_days
-           WHERE status NOT IN ('VERIFIED')
-           ORDER BY trading_date DESC"""
-    ).fetchall()
     return {
         "sessions": [dict(r) for r in incomplete_sessions],
-        "days": [dict(r) for r in incomplete_days],
     }
 
 

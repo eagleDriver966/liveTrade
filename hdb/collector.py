@@ -29,7 +29,7 @@ from .config import Config
 from .control import CollectionControl
 from .csv_parser import parse_csv
 from .fingerprint import compute_fingerprint, page_fingerprint
-from .importer import build_normalized_fields, import_parsed_part
+from .importer import build_alert_fields, import_parsed_part
 from .manifest import Manifest, PartEntry
 from .paths import (
     collision_safe_path,
@@ -309,10 +309,10 @@ def collect_session(
             checksum = sha256_file(final_path)
             event_fps: list[str] = []
             for row in parsed.rows:
-                nf = build_normalized_fields(row, session, panel_position, trading_date)
-                if nf["alert_timestamp"] is None or not nf["symbol"]:
+                af = build_alert_fields(row, session, trading_date)
+                if af["alert_timestamp"] is None or not af["symbol"]:
                     continue
-                event_fps.append(compute_fingerprint(nf).value)
+                event_fps.append(compute_fingerprint(af).value)
             page_fp = page_fingerprint(event_fps) if event_fps else None
 
             part_id = repo.register_part(
@@ -352,7 +352,7 @@ def collect_session(
             repo.mark_part_imported(conn, part_id)
             control.emit("part_done", f"{session} {trading_date} part {part_number}",
                          session=session, part=part_number, rows=parsed.row_count,
-                         imported=stats.raw_inserted)
+                         inserted=stats.alerts_inserted)
 
             current = PageRecord(
                 part_number=part_number,
@@ -443,7 +443,6 @@ def collect_date(
 ) -> dict[str, SessionResult]:
     """Collect all three sessions for one trading date."""
     control = control or CollectionControl()
-    repo.upsert_day(conn, run_id, trading_date, Status.COLLECTING)
     results: dict[str, SessionResult] = {}
     for session in sessions:
         control.check_cancel()
@@ -457,7 +456,6 @@ def collect_date(
     from .status import date_is_verified
 
     day_status = Status.VERIFIED if date_is_verified(status_map) else Status.INCOMPLETE
-    repo.upsert_day(conn, run_id, trading_date, day_status)
     logger.info("date_done", trading_date=trading_date.isoformat(),
                 status=str(day_status),
                 sessions={k: str(v.status) for k, v in results.items()})

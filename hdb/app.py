@@ -25,6 +25,13 @@ from .paths import new_run_id
 from .status import Status
 
 
+class ProductionBlockedError(RuntimeError):
+    """Raised when production collection is attempted with the mock backend.
+
+    The mock backend must never write simulated data into the real database.
+    """
+
+
 class HdbApp:
     def __init__(self, config_path: str = "config.json", echo_logs: bool = False) -> None:
         self.config: Config = load_config(config_path)
@@ -105,16 +112,36 @@ class HdbApp:
             )
         return candidate
 
+    # -- production safety ---------------------------------------------------
+    @property
+    def backend_name(self) -> str:
+        return self.config.get("automation", "backend", default="pywinauto")
+
+    def _require_real_backend(self) -> None:
+        """Block production collection when the backend is the mock simulator.
+
+        Guarantees mock/simulated data can never be written to the real
+        database via the application's collection paths.
+        """
+        if self.backend_name.lower() == "mock":
+            raise ProductionBlockedError(
+                "Production collection is blocked while automation.backend='mock'. "
+                "The mock backend is for diagnostics/tests only and must never "
+                "insert simulated data into the real database. Set "
+                "automation.backend='pywinauto' on the Windows machine to collect."
+            )
+
     # -- collection ----------------------------------------------------------
     def collect_single_date(
         self, conn, trading_date: date, control: CollectionControl | None = None,
         run_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_real_backend()
         run_id = run_id or new_run_id()
         repo.create_run(
             conn, run_id, "single_date",
             date.fromisoformat(self.config.get("history_boundary_date", default="2026-02-01")),
-            trading_date, trading_date,
+            trading_date, trading_date, backend=self.backend_name,
         )
         self.logger.run_id = run_id
         results = collect_date(
@@ -128,13 +155,14 @@ class HdbApp:
         self, conn, newest: date | None = None, boundary: date | None = None,
         control: CollectionControl | None = None, run_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_real_backend()
         run_id = run_id or new_run_id()
         newest = newest or self.newest_collectable_day()
         boundary = boundary or date.fromisoformat(
             self.config.get("history_boundary_date", default="2026-02-01")
         )
         repo.create_run(conn, run_id, "date_range",
-                        boundary, newest, boundary)
+                        boundary, newest, boundary, backend=self.backend_name)
         self.logger.run_id = run_id
         results = collect_range(
             conn, self.backend(), self.calendar, self.config, self.logger,
@@ -147,8 +175,10 @@ class HdbApp:
         self, conn, trading_date: date, session: str,
         control: CollectionControl | None = None, run_id: str | None = None,
     ) -> dict[str, Any]:
+        self._require_real_backend()
         run_id = run_id or new_run_id()
-        repo.create_run(conn, run_id, "single_session", None, trading_date, trading_date)
+        repo.create_run(conn, run_id, "single_session", None, trading_date,
+                        trading_date, backend=self.backend_name)
         self.logger.run_id = run_id
         result = collect_session(
             conn, self.backend(), self.calendar, self.config, self.logger,
@@ -156,15 +186,46 @@ class HdbApp:
         )
         return {"run_id": run_id, "result": result.to_dict()}
 
-    # -- import / verify / reconcile ----------------------------------------
+    def resume_incomplete(
+        self, conn, control: CollectionControl | None = None
+    ) -> dict[str, Any]:
+        """Re-collect incomplete sessions safely.
+
+        Each incomplete session is recollected in a NEW run directory (earlier
+        runs are never overwritten); overlaps are deduped on import.
+        """
+        self._require_real_backend()
+        plan = reconcile.resume_plan(conn)
+        recollected: list[dict[str, Any]] = []
+        for item in plan["plan"]:
+            control and control.check_cancel()
+            trading_date = date.fromisoformat(item["trading_date"])
+            session = item["session"]
+            run_id = new_run_id()
+            repo.create_run(conn, run_id, "resume", None, trading_date,
+                            trading_date, backend=self.backend_name)
+            self.logger.run_id = run_id
+            result = collect_session(
+                conn, self.backend(), self.calendar, self.config, self.logger,
+                run_id, trading_date, session, control,
+            )
+            recollected.append({"run_id": run_id, **result.to_dict()})
+        return {"resumed": recollected, "plan": plan}
+
     def import_existing(self, conn, run_id: str | None = None) -> dict[str, Any]:
+        """Import already-saved CSV exports under ``exports_root`` (recovery/CLI).
+
+        Reads real files on disk; safe to re-run (idempotent dedup).
+        """
         run_id = run_id or new_run_id()
-        repo.create_run(conn, run_id, "import", None, None, None)
+        repo.create_run(conn, run_id, "import", None, None, None,
+                        backend=self.backend_name)
         exports_root = self.config.get("paths", "exports_root", default="historical_exports")
         summary = import_export_tree(conn, exports_root, self.calendar, run_id, logger=self.logger)
         repo.set_run_status(conn, run_id, Status.IMPORTED)
         return {"run_id": run_id, "summary": summary.as_dict()}
 
+    # -- verify / reconcile / status ----------------------------------------
     def verify(self, conn) -> dict[str, Any]:
         return reconcile.verify_collection(conn)
 
@@ -174,8 +235,3 @@ class HdbApp:
 
     def resume_plan(self, conn) -> dict[str, Any]:
         return reconcile.resume_plan(conn)
-
-    def open_export_folder_path(self) -> str:
-        return os.path.abspath(
-            self.config.get("paths", "exports_root", default="historical_exports")
-        )

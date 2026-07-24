@@ -28,9 +28,9 @@ _PART_RE = re.compile(r"^(?P<session>HPRE|NHP|HPOST)_(?P<date>\d{4}-\d{2}-\d{2})
 class ImportSummary:
     files: int = 0
     parts_imported: int = 0
-    rows_raw: int = 0
+    alerts_inserted: int = 0
+    sources_added: int = 0
     rows_rejected: int = 0
-    normalized_new: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -55,7 +55,6 @@ def import_run_dir(
     calendar: ExchangeCalendar,
     run_id: str,
     logger=None,
-    mirror_to_flat: bool = True,
 ) -> ImportSummary:
     """Import every part CSV in a single ``run_YYYYMMDD_HHMMSS`` directory."""
     summary = ImportSummary()
@@ -102,19 +101,19 @@ def import_run_dir(
                 Status.VALIDATED,
             )
         except Exception:
-            # Part may already be registered from a prior import; continue.
-            pass
+            # Part may already be registered from a prior import; roll back the
+            # failed insert so the next statement can open a fresh transaction.
+            conn.rollback()
 
         stats: ImportStats = import_parsed_part(
             conn, parsed, run_id, meta["trading_date"], meta["session"],
-            panel_position, meta["part_number"], fname,
-            mirror_to_flat=mirror_to_flat, logger=logger,
+            panel_position, meta["part_number"], fname, logger=logger,
         )
         summary.files += 1
         summary.parts_imported += 1
-        summary.rows_raw += stats.raw_inserted
+        summary.alerts_inserted += stats.alerts_inserted
+        summary.sources_added += stats.sources_added
         summary.rows_rejected += stats.rejected
-        summary.normalized_new += stats.normalized_new
 
     return summary
 
@@ -125,7 +124,6 @@ def import_export_tree(
     calendar: ExchangeCalendar,
     run_id: str,
     logger=None,
-    mirror_to_flat: bool = True,
 ) -> ImportSummary:
     """Walk the entire ``historical_exports`` tree and import every run dir."""
     total = ImportSummary()
@@ -133,12 +131,11 @@ def import_export_tree(
         if os.path.basename(root).startswith("run_") and any(
             f.lower().endswith(".csv") for f in files
         ):
-            s = import_run_dir(conn, root, calendar, run_id, logger=logger,
-                               mirror_to_flat=mirror_to_flat)
+            s = import_run_dir(conn, root, calendar, run_id, logger=logger)
             total.files += s.files
             total.parts_imported += s.parts_imported
-            total.rows_raw += s.rows_raw
+            total.alerts_inserted += s.alerts_inserted
+            total.sources_added += s.sources_added
             total.rows_rejected += s.rows_rejected
-            total.normalized_new += s.normalized_new
             total.errors.extend(s.errors)
     return total

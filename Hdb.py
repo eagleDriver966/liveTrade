@@ -28,7 +28,7 @@ import threading
 from datetime import date, datetime
 from typing import Any
 
-from hdb.app import HdbApp
+from hdb.app import HdbApp, ProductionBlockedError
 from hdb.control import CollectionControl, ProgressEvent
 
 
@@ -64,9 +64,10 @@ def cli(argv: list[str] | None = None) -> int:
     p_cr.add_argument("--boundary", default=None, help="YYYY-MM-DD (default: config)")
 
     sub.add_parser("import", help="Import existing exports under exports_root")
-    sub.add_parser("verify", help="Verify collection (counts + integrity)")
+    sub.add_parser("verify", help="Verify collection (counts + integrity + reconcile)")
     sub.add_parser("reconcile", help="Reconcile DB vs on-disk parts")
     sub.add_parser("resume", help="Show resume plan for incomplete work")
+    sub.add_parser("resume-run", help="Resume: re-collect incomplete sessions")
     sub.add_parser("status", help="Show collection status")
     sub.add_parser("readiness", help="Show readiness for unattended collection")
     sub.add_parser("gui", help="Launch the Tkinter GUI")
@@ -114,6 +115,8 @@ def cli(argv: list[str] | None = None) -> int:
             newest = date.fromisoformat(args.newest) if args.newest else None
             boundary = date.fromisoformat(args.boundary) if args.boundary else None
             _print(app.collect_date_range(conn, newest=newest, boundary=boundary))
+        elif args.command == "resume-run":
+            _print(app.resume_incomplete(conn))
         elif args.command == "import":
             _print(app.import_existing(conn))
         elif args.command == "verify":
@@ -126,6 +129,9 @@ def cli(argv: list[str] | None = None) -> int:
             _print(app.verify(conn))
         else:  # pragma: no cover
             parser.error(f"Unknown command {args.command}")
+    except ProductionBlockedError as exc:
+        print(f"BLOCKED: {exc}", file=sys.stderr)
+        return 3
     finally:
         conn.close()
     return 0
@@ -180,16 +186,12 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
             ("Assign Panel Positions", self.on_assign),
             ("Collect Single Date", self.on_collect_single),
             ("Collect Date Range", self.on_collect_range),
-            ("Resume Incomplete Run", self.on_resume),
-            ("Import Existing Exports", self.on_import),
-            ("Verify Collection", self.on_verify),
+            ("Resume Incomplete Run", self.on_resume_run),
             ("View Collection Status", self.on_status),
-            ("Open Export Folder", self.on_open_folder),
-            ("Settings", self.on_settings),
         ]
         for i, (label, cmd) in enumerate(buttons):
             ttk.Button(toolbar, text=label, command=cmd).grid(
-                row=i // 5, column=i % 5, padx=3, pady=3, sticky="ew"
+                row=i // 3, column=i % 3, padx=3, pady=3, sticky="ew"
             )
 
         control_bar = ttk.Frame(self.root)
@@ -270,7 +272,18 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
             self.app.assign_panel(session, pos, sig)
         self._append(f"Panel assignment: {self.app.readiness()}")
 
+    def _blocked_if_mock(self) -> bool:
+        if self.app.backend_name.lower() == "mock":
+            self.messagebox.showerror(
+                "Blocked",
+                "Production collection is blocked while backend='mock'. "
+                "Set automation.backend='pywinauto' on the Windows machine.")
+            return True
+        return False
+
     def on_collect_single(self):
+        if self._blocked_if_mock():
+            return
         d = self.simpledialog.askstring("Collect Single Date", "Date (YYYY-MM-DD):")
         if not d:
             return
@@ -281,6 +294,8 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
         self._start_worker(task)
 
     def on_collect_range(self):
+        if self._blocked_if_mock():
+            return
         if not self.messagebox.askyesno(
             "Collect Date Range",
             "Run a full backward range collection to the configured boundary?"
@@ -292,44 +307,23 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
             self.progress_queue.put(ProgressEvent("result", "collect-range complete", res))
         self._start_worker(task)
 
-    def on_resume(self):
-        def task(conn):
-            plan = self.app.resume_plan(conn)
-            self.progress_queue.put(ProgressEvent("resume", "resume plan", plan))
-        self._start_worker(task)
+    def on_resume_run(self):
+        if self.app.backend_name.lower() == "mock":
+            self.messagebox.showerror(
+                "Blocked", "Collection is blocked while backend='mock'.")
+            return
 
-    def on_import(self):
         def task(conn):
-            res = self.app.import_existing(conn)
-            self.progress_queue.put(ProgressEvent("import", "import complete", res))
-        self._start_worker(task)
-
-    def on_verify(self):
-        def task(conn):
-            res = self.app.verify(conn)
-            self.progress_queue.put(ProgressEvent("verify", "verify complete", res))
+            res = self.app.resume_incomplete(conn, self.control)
+            self.progress_queue.put(ProgressEvent("resume", "resume complete", res))
         self._start_worker(task)
 
     def on_status(self):
         def task(conn):
+            # View Collection Status includes row-count reconciliation.
             res = self.app.verify(conn)
             self.progress_queue.put(ProgressEvent("status", "status", res))
         self._start_worker(task)
-
-    def on_open_folder(self):
-        path = self.app.open_export_folder_path()
-        os.makedirs(path, exist_ok=True)
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(path)  # type: ignore[attr-defined]
-            else:
-                self._append(f"Export folder: {path}")
-        except Exception as exc:
-            self._append(f"Export folder: {path} ({exc})")
-
-    def on_settings(self):
-        self._append(f"Config path: {self.app.config.path}")
-        self._append(json.dumps(self.app.config.data, indent=2))
 
     def on_pause(self):
         self.control.request_pause()
