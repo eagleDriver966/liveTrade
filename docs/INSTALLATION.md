@@ -35,7 +35,7 @@ Linux/macOS for development and CI.
    ```
    * On Windows this also installs `pywinauto`, `pywin32`, `comtypes`, `Pillow`
      (they are marked `sys_platform == "win32"` and skipped elsewhere).
-   * `pandas_market_calendars`, `openpyxl`, `tzdata`, `pytest` install everywhere.
+   * `pandas_market_calendars`, `tzdata`, `pytest` install everywhere.
    * The GUI uses Tkinter, which ships with standard CPython on Windows/macOS.
      On Debian/Ubuntu install it via the system package `python3-tk`.
 

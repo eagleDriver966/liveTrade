@@ -1,4 +1,4 @@
-"""Tests: importer lineage, dedup across overlapping pages, rejected rows, flat mirror."""
+"""Tests: importer dedup into alerts_flat, alert_sources lineage, rejected rows."""
 
 from __future__ import annotations
 
@@ -28,18 +28,20 @@ def test_basic_import_lineage(migrated_db):
     conn, _ = migrated_db
     repo.create_run(conn, "r1", "single_session", None, D, D)
     stats = _import(conn, _csv([("15:59:00", "AAA", 10.0), ("15:58:00", "BBB", 11.0)]), "r1", 1)
-    assert stats.raw_inserted == 2
-    assert stats.normalized_new == 2
+    assert stats.alerts_inserted == 2
     assert stats.sources_added == 2
-    assert dbmod.row_count(conn, "alerts_raw") == 2
-    assert dbmod.row_count(conn, "alerts_normalized") == 2
+    assert dbmod.row_count(conn, "alerts_flat") == 2
     assert dbmod.row_count(conn, "alert_sources") == 2
     # Lineage columns populated.
-    row = conn.execute("SELECT * FROM alerts_raw LIMIT 1").fetchone()
+    row = conn.execute("SELECT * FROM alert_sources LIMIT 1").fetchone()
     assert row["run_id"] == "r1"
     assert row["source_part_number"] == 1
-    assert row["parser_version"]
-    assert row["raw_json"]
+    assert row["source_row_number"] >= 1
+    assert row["source_filename"].endswith(".csv")
+    # alerts_flat has session + fingerprint.
+    a = conn.execute("SELECT * FROM alerts_flat LIMIT 1").fetchone()
+    assert a["session"] == "NHP"
+    assert a["fingerprint"]
 
 
 def test_overlap_dedup_preserves_all_sources(migrated_db):
@@ -48,11 +50,14 @@ def test_overlap_dedup_preserves_all_sources(migrated_db):
     # Page 1 and page 2 share CCC (page overlap).
     _import(conn, _csv([("15:59:00", "AAA", 10.0), ("15:57:00", "CCC", 12.0)]), "r1", 1)
     _import(conn, _csv([("15:57:00", "CCC", 12.0), ("09:30:00", "EEE", 14.0)]), "r1", 2)
-    # 3 distinct normalized events (AAA, CCC, EEE), CCC has 2 sources.
-    assert dbmod.row_count(conn, "alerts_normalized") == 3
-    assert dbmod.row_count(conn, "alert_sources") == 4  # 2 + 2
-    occ = conn.execute("SELECT occurrence_count FROM alerts_normalized WHERE symbol='CCC'").fetchone()[0]
-    assert occ == 2
+    # 3 distinct alerts (AAA, CCC, EEE); 4 source occurrences (CCC twice).
+    assert dbmod.row_count(conn, "alerts_flat") == 3
+    assert dbmod.row_count(conn, "alert_sources") == 4
+    ccc_sources = conn.execute(
+        """SELECT COUNT(*) FROM alert_sources s JOIN alerts_flat a
+           ON a.id = s.alert_flat_id WHERE a.symbol='CCC'"""
+    ).fetchone()[0]
+    assert ccc_sources == 2
 
 
 def test_reimport_same_file_is_idempotent(migrated_db):
@@ -61,9 +66,10 @@ def test_reimport_same_file_is_idempotent(migrated_db):
     text = _csv([("15:59:00", "AAA", 10.0)])
     _import(conn, text, "r1", 1)
     stats2 = _import(conn, text, "r1", 1)  # same run/part/file/rows
-    assert stats2.raw_duplicate == 1
-    assert stats2.raw_inserted == 0
-    assert dbmod.row_count(conn, "alerts_raw") == 1
+    assert stats2.sources_duplicate == 1
+    assert stats2.sources_added == 0
+    assert dbmod.row_count(conn, "alerts_flat") == 1
+    assert dbmod.row_count(conn, "alert_sources") == 1
 
 
 def test_rejected_rows_recorded(migrated_db):
@@ -74,11 +80,16 @@ def test_rejected_rows_recorded(migrated_db):
     stats = _import(conn, text, "r1", 1)
     assert stats.rejected == 1
     assert dbmod.row_count(conn, "rejected_rows") == 1
+    assert dbmod.row_count(conn, "alerts_flat") == 0
 
 
-def test_flat_mirror_populated(migrated_db):
+def test_alerts_flat_dedup_across_runs(migrated_db):
     conn, _ = migrated_db
     repo.create_run(conn, "r1", "single_session", None, D, D)
-    stats = _import(conn, _csv([("15:59:00", "AAA", 10.0)]), "r1", 1)
-    assert stats.flat_inserted == 1
+    repo.create_run(conn, "r2", "single_session", None, D, D)
+    text = _csv([("15:59:00", "AAA", 10.0)])
+    _import(conn, text, "r1", 1)
+    _import(conn, text, "r2", 1)  # different run re-collecting same alert
+    # One distinct alert, but two source occurrences (one per run).
     assert dbmod.row_count(conn, "alerts_flat") == 1
+    assert dbmod.row_count(conn, "alert_sources") == 2

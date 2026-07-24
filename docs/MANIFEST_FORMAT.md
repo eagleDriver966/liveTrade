@@ -37,7 +37,7 @@ historical_exports/<year>/<trading_date>/<session>/run_<YYYYMMDD_HHMMSS>/manifes
       "oldest_timestamp": "2026-02-02T14:31:00-05:00",
       "first_symbol": "AAPL",
       "last_symbol": "TSLA",
-      "page_fingerprint": "<sha256 over normalized event fingerprints>",
+      "page_fingerprint": "<sha256 over the page's alert fingerprints>",
       "status": "VALIDATED",
       "validated_at": "2026-02-02T14:01:10Z",
       "notes": {}
@@ -52,8 +52,7 @@ historical_exports/<year>/<trading_date>/<session>/run_<YYYYMMDD_HHMMSS>/manifes
 * `parts` are ordered by `part_number` (001, 002, ...). Part 001 is the newest
   history page; each subsequent part is one destructive **More** older.
 * `sha256` is over the raw CSV bytes; `page_fingerprint` is an order-independent
-  SHA-256 over the page's normalized event fingerprints (used for
-  repeated-page detection).
+  SHA-256 over the page's alert fingerprints (used for repeated-page detection).
 * `status` at the top level is `COLLECTING` until a completion condition is met,
   then `VERIFIED` (or `EMPTY_VERIFIED` for an empty session).
 * The manifest is cross-checked against the database and re-hashed by

@@ -53,11 +53,14 @@ collection + lineage tables. See `IMPLEMENTATION_REPORT.md` and
 
 ## 4. What was preserved vs added
 
-* **Preserved / implemented as baseline:** `alerts_flat` table and legacy
-  fingerprint mirror; CSV parsing; header detection; timestamp parsing;
-  deduplication; date handling; import; (Excel export helper is provided at the
-  data layer via `alerts_flat` + `openpyxl` dependency for a future/legacy view).
-* **Added:** `collection_runs`, `collection_days`, `collection_sessions`,
-  `history_export_parts`, `alerts_raw`, `alerts_normalized`, `alert_sources`,
-  `rejected_rows`, `schema_versions`; the collection engine; automation
-  adapters; diagnostics; resume/reconciliation; Tkinter GUI + CLI.
+* **Preserved / implemented as baseline:** `alerts_flat` table (the alert
+  store); CSV parsing; header detection; timestamp parsing; deduplication (now
+  via a stable SHA-256 fingerprint); date handling; import.
+* **Added (minimum needed to track collection):** `collection_runs`,
+  `collection_sessions`, `history_export_parts`, `alert_sources`,
+  `rejected_rows` (plus `schema_versions` for migration tracking); the
+  collection engine; automation adapters; diagnostics; resume/reconciliation;
+  Tkinter GUI + CLI.
+* **Explicitly out of scope (not built):** trading signals, scoring models,
+  profit analysis, dashboards, strategy backtests, Excel reporting, broker
+  integrations.

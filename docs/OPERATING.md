@@ -23,14 +23,23 @@ python Hdb.py --config config.json gui
 ```
 
 Buttons: **Diagnostic Setup**, **Assign Panel Positions**, **Collect Single
-Date**, **Collect Date Range**, **Resume Incomplete Run**, **Import Existing
-Exports**, **Verify Collection**, **View Collection Status**, **Open Export
-Folder**, **Settings**, plus **Pause / Resume / Cancel**.
+Date**, **Collect Date Range**, **Resume Incomplete Run**, **View Collection
+Status**, plus **Pause / Resume / Cancel**.
 
 Work runs in background threads; the log pane updates via a queue drained by
 `root.after`. Pause/Resume/Cancel are cooperative and safe - a cancel is only
 honored at safe checkpoints (never mid-save, never right before a destructive
 More on unvalidated data).
+
+**View Collection Status** shows per-table counts, VERIFIED dates, and the
+row-count reconciliation (exported part rows vs source occurrences + rejected).
+
+## Mock backend is blocked for production
+
+When `automation.backend = "mock"`, all collection actions are **blocked** and
+refuse to write to the real database (the CLI exits with code 3; the GUI shows a
+blocked dialog). The mock backend is only for diagnostics and the automated
+tests. Set `automation.backend = "pywinauto"` on the Windows machine to collect.
 
 ## CLI
 
@@ -47,9 +56,10 @@ python Hdb.py --config config.json collect-date 2026-02-02          # phase 8
 python Hdb.py --config config.json collect-range --newest 2026-02-05 --boundary 2026-02-02
 
 python Hdb.py --config config.json import        # import existing CSV exports
-python Hdb.py --config config.json verify        # counts + integrity + VERIFIED dates
+python Hdb.py --config config.json verify        # counts + integrity + reconciliation
 python Hdb.py --config config.json reconcile     # DB vs on-disk checksums
-python Hdb.py --config config.json resume        # resume plan for incomplete work
+python Hdb.py --config config.json resume        # show resume plan (read-only)
+python Hdb.py --config config.json resume-run    # re-collect incomplete sessions
 ```
 
 ## Current-day safety
@@ -73,8 +83,8 @@ A session is complete when documented signals are met:
 * **Session boundary reached** - oldest collected timestamp reaches/passes the
   official session start.
 * **Explicit completion** - Trade Ideas reports no-more-history / no-more-results.
-* **Repeated page** - same checksum, same normalized event set, same
-  oldest/newest, or no new event fingerprints.
+* **Repeated page** - same checksum, same alert set, same oldest/newest, or no
+  new alert fingerprints.
 * **No backward progress** - oldest timestamp fails to move earlier after More.
 
 At least two signals are used where possible; a page with fewer than 1,000 rows

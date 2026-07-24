@@ -28,9 +28,9 @@ Positions** to refresh signatures after any Trade Ideas layout change.
 ## Where to look
 
 * Per-run truth: `historical_exports/.../run_*/manifest.json`.
-* DB bookkeeping: `collection_runs`, `collection_days`, `collection_sessions`,
+* DB bookkeeping: `collection_runs`, `collection_sessions`,
   `history_export_parts`.
-* Data + lineage: `alerts_raw`, `alerts_normalized`, `alert_sources`,
+* Data + lineage: `alerts_flat` (the alert store), `alert_sources`,
   `rejected_rows`.
-* `python Hdb.py --config config.json reconcile` cross-checks DB vs disk
-  checksums and manifests.
+* `python Hdb.py --config config.json verify` shows counts + row-count
+  reconciliation; `reconcile` cross-checks DB vs disk checksums and manifests.

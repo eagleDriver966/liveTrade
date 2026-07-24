@@ -95,7 +95,7 @@ def test_one_page_history(tmp_path):
     res = h.collect()
     assert res.status == Status.VERIFIED
     assert res.parts == 1
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 2
+    assert dbmod.row_count(h.conn, "alerts_flat") == 2
 
 
 def test_multiple_destructive_more_pages(tmp_path):
@@ -108,7 +108,7 @@ def test_multiple_destructive_more_pages(tmp_path):
     res = h.collect()
     assert res.status == Status.VERIFIED
     assert res.parts == 3
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 6
+    assert dbmod.row_count(h.conn, "alerts_flat") == 6
 
 
 def test_overlapping_pages_dedup(tmp_path):
@@ -119,9 +119,10 @@ def test_overlapping_pages_dedup(tmp_path):
     h = Harness(tmp_path, _scenario(pages))
     res = h.collect()
     assert res.status == Status.VERIFIED
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 3  # AAA, CCC, EEE
+    assert dbmod.row_count(h.conn, "alerts_flat") == 3  # AAA, CCC, EEE
     occ = h.conn.execute(
-        "SELECT occurrence_count FROM alerts_normalized WHERE symbol='CCC'"
+        """SELECT COUNT(*) FROM alert_sources s JOIN alerts_flat a
+           ON a.id = s.alert_flat_id WHERE a.symbol='CCC'"""
     ).fetchone()[0]
     assert occ == 2
 
@@ -136,15 +137,15 @@ def test_repeated_final_page(tmp_path):
     h = Harness(tmp_path, scen)
     res = h.collect()
     assert res.status in (Status.VERIFIED, Status.DUPLICATE_PAGE)
-    # The repeat is detected; normalized events remain 4 distinct.
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 4
+    # The repeat is detected; distinct alerts remain 4.
+    assert dbmod.row_count(h.conn, "alerts_flat") == 4
 
 
 def test_empty_session(tmp_path):
     h = Harness(tmp_path, _scenario([[]]))
     res = h.collect()
     assert res.status == Status.EMPTY_VERIFIED
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 0
+    assert dbmod.row_count(h.conn, "alerts_flat") == 0
 
 
 # -- export failures ---------------------------------------------------------
@@ -157,7 +158,7 @@ def test_save_as_timeout_stops_before_more(tmp_path):
     assert "save_failed" in (res.error or "")
     # No parts registered, no rows imported (never advanced past failed save).
     assert dbmod.row_count(h.conn, "history_export_parts") == 0
-    assert dbmod.row_count(h.conn, "alerts_normalized") == 0
+    assert dbmod.row_count(h.conn, "alerts_flat") == 0
 
 
 def test_overwrite_dialog_generates_unique_filename(tmp_path):
@@ -248,7 +249,9 @@ def test_schema_drift_detected_and_healed(tmp_path):
     # v1 was effectively already partially present; runner brings it to v2.
     assert summary["version_after"] == 2
     conn = dbmod.connect(db_path)
-    assert "alerts_normalized" in dbmod.list_tables(conn)
+    tables = dbmod.list_tables(conn)
+    assert "alert_sources" in tables
+    assert "collection_sessions" in tables
     conn.close()
 
 

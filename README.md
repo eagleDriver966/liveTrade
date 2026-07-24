@@ -1,14 +1,18 @@
 # Hdb - Trade Ideas Historical-Alert Collection System
 
-A safe, resumable, auditable Windows automation tool that collects historical
-Trade Ideas alerts (from **February 1, 2026** onward), exports every history page
-to CSV, imports all rows into SQLite with **complete source lineage**, and
-preserves that lineage for future quantitative analysis.
+A single-purpose Windows tool whose only objective is to **build and expand the
+SQLite Trade Ideas alert database**. It connects to a running Trade Ideas
+desktop app, saves each history page to CSV before clicking More, imports every
+page into SQLite, deduplicates overlaps, and preserves source lineage.
 
-> **Historical research collection only.** This tool never places trades,
-> submits orders, or touches brokerage execution endpoints. It never approves
-> overwrite confirmations, never deletes raw exports, and never deletes database
-> records.
+> **Scope:** database collection only. It does **not** build trading signals,
+> scoring models, profit analysis, dashboards, strategy backtests, Excel
+> reporting, or broker integrations.
+
+> **Historical research collection only.** No order/trade/brokerage-execution
+> code paths exist. It never approves overwrite confirmations, never deletes raw
+> exports, and never deletes database records. **Production collection is blocked
+> when `backend=mock`** so simulated data can never enter the real database.
 
 > **Note on origin:** No prior `Hdb.py` existed in this repository, so the
 > system was built from scratch and implements the previously described
@@ -54,11 +58,11 @@ hdb/
   paths.py                 Immutable run dirs, filenames, collision-safe saves
   manifest.py              Per-run manifest.json
   db.py / migrations.py    Backup, WAL, integrity check, transactional migrations
-  importer.py              Raw -> normalized + alert_sources lineage, dedup
+  importer.py              Dedup into alerts_flat + alert_sources lineage
   collection.py            Completion criteria + destructive-More guard (pure)
   collector.py             The export-before-More driver
-  repository.py            Runs/days/sessions/parts bookkeeping
-  reconcile.py             Verify + reconcile + resume planning
+  repository.py            Runs/sessions/parts bookkeeping
+  reconcile.py             Verify + reconcile row counts + resume planning
   diagnostics.py           Discovery + panel-position assignment
   control.py               Cancel / pause / resume / progress
   app.py                   Service layer wiring everything together
@@ -83,11 +87,21 @@ python Hdb.py --config config.json gui            # or use the GUI
 See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) and
 [`docs/OPERATING.md`](docs/OPERATING.md).
 
+## Database
+
+The existing `alerts_flat` table (the alert store) is preserved; each imported
+alert gets a stable SHA-256 fingerprint for deduplication. Only the minimum
+tracking tables are added:
+
+`collection_runs`, `collection_sessions`, `history_export_parts`,
+`alert_sources` (source lineage: filename, part number, source row number,
+session, trading date), `rejected_rows`.
+
 ## Testing
 
 ```bash
 pip install -r requirements.txt
-pytest -q                       # 83 tests, cross-platform (uses mock backend)
+pytest -q                       # 87 tests, cross-platform (uses mock backend)
 python examples/demo_collection.py   # full pipeline demo (no Windows needed)
 ```
 

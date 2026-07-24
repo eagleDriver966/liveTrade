@@ -37,19 +37,23 @@ Windows) and a deterministic mock backend used by the tests.
   (checksum/page-fingerprint/no-new-events), and no-backward-progress. A page
   with `< min_conclusive_rows` (default 1000) is never conclusive on a single
   signal.
-* **Source lineage is complete.** Every raw row stores run id, trading date,
-  session, panel position, source filename, part number, source row number, raw
-  JSON, parser version, import timestamp, and normalization status. Normalized
-  events dedupe by a versioned fingerprint while **all** occurrences are kept in
-  `alert_sources` (page overlap preserved).
-* **Versioned fingerprints** (`fingerprint.py`) exclude filename/part/row so the
-  same real event fingerprints identically across overlapping pages; fallback
-  versions (`fp-v1` -> `fp-v1a` -> `fp-v1b` -> `fp-v1c`) handle missing fields and
-  the version used is recorded.
+* **Source lineage is preserved.** The alert is stored once in `alerts_flat`
+  (deduped by fingerprint); every occurrence is recorded in `alert_sources`
+  with run id, trading date, session, panel position, source filename, part
+  number, and source row number (page overlap preserved).
+* **Stable fingerprints** (`fingerprint.py`) use trading date, timestamp, alert
+  type, symbol, price, alert count, volume, and session (not only
+  symbol/type/time/price). They exclude filename/part/row so the same alert
+  fingerprints identically across overlapping pages; a `fp-v1-lite` fallback
+  handles missing volume/count and the version used is recorded.
+* **Production is blocked with the mock backend.** All application collection
+  paths raise `ProductionBlockedError` when `automation.backend='mock'`, so
+  simulated data can never enter the real database. Tests/demo drive the engine
+  directly against throwaway temp databases.
 * **Migrations are transactional and backup-first**, enable WAL, run
   `PRAGMA integrity_check`, inspect existing structure, and record
-  `schema_versions`. `alerts_flat` is preserved (and mirrored to for backward
-  compatibility) and schema-drift safe.
+  `schema_versions`. `alerts_flat` is preserved (a `session` column is added if
+  missing) and schema-drift safe; only the 5 tracking tables are added.
 * **Thread-safe GUI**: worker threads never touch Tk widgets; they push
   `ProgressEvent`s onto a `queue.Queue` drained by `root.after`. Cancel/pause/
   resume are cooperative.
@@ -59,10 +63,11 @@ Windows) and a deterministic mock backend used by the tests.
 
 ## Validation evidence
 
-* `pytest -q` -> **83 passed** (see `docs/TEST_RESULTS.md`).
+* `pytest -q` -> **87 passed** (see `docs/TEST_RESULTS.md`).
 * `python examples/demo_collection.py` -> **PASS**: 2 days collected, 6 sessions,
-  12 parts, 24 raw rows -> 20 normalized (overlaps deduped), 24 `alert_sources`,
-  0 rejected, both dates VERIFIED, reconcile ok, re-import idempotent.
+  12 parts, 24 exported rows -> 20 distinct alerts in `alerts_flat` (overlaps
+  deduped), 24 `alert_sources` occurrences, 0 rejected, both dates VERIFIED,
+  row-count reconciliation balanced, re-collect dedup stable.
 * GUI rendered under Xvfb showing a full VERIFIED run (screenshot in the PR).
 
 ## Not validated in this environment

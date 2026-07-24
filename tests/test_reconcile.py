@@ -36,7 +36,11 @@ def test_verify_collection_counts_and_integrity(migrated_db):
     conn, _ = migrated_db
     result = reconcile.verify_collection(conn)
     assert result["integrity_ok"] is True
-    assert "alerts_normalized" in result["counts"]
+    assert "alerts_flat" in result["counts"]
+    assert "alert_sources" in result["counts"]
+    assert "alerts_normalized" not in result["counts"]
+    assert "row_count_reconciliation" in result
+    assert result["row_count_reconciliation"]["balanced"] is True
 
 
 def test_reconcile_checksum_ok(migrated_db, tmp_path):

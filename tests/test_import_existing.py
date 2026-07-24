@@ -39,8 +39,8 @@ def test_import_export_tree(migrated_db, tmp_path):
     cal = ExchangeCalendar()
     summary = import_export_tree(conn, root, cal, "imp1")
     assert summary.files == 2
-    assert dbmod.row_count(conn, "alerts_normalized") == 4
-    assert dbmod.row_count(conn, "alerts_raw") == 4
+    assert dbmod.row_count(conn, "alerts_flat") == 4
+    assert dbmod.row_count(conn, "alert_sources") == 4
 
 
 def test_reimport_tree_is_idempotent(migrated_db, tmp_path):
@@ -49,7 +49,7 @@ def test_reimport_tree_is_idempotent(migrated_db, tmp_path):
     _write_part(root, "NHP", 1, [("15:59:00", "AAA")])
     cal = ExchangeCalendar()
     import_export_tree(conn, root, cal, "imp1")
-    import_export_tree(conn, root, cal, "imp2")  # second run, same files
-    # Raw dedupe keys on run_id so a new run re-adds raw rows, but normalized
-    # dedupe keeps a single event.
-    assert dbmod.row_count(conn, "alerts_normalized") == 1
+    import_export_tree(conn, root, cal, "imp1")  # same run id + files -> no-op
+    # Dedupe keeps a single alert and a single source occurrence.
+    assert dbmod.row_count(conn, "alerts_flat") == 1
+    assert dbmod.row_count(conn, "alert_sources") == 1

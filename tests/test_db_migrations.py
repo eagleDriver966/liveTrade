@@ -18,11 +18,14 @@ def test_fresh_migration_creates_all_tables(tmp_path):
     conn = dbmod.connect(db_path)
     tables = set(dbmod.list_tables(conn))
     expected = {
-        "alerts_flat", "collection_runs", "collection_days", "collection_sessions",
-        "history_export_parts", "alerts_raw", "alerts_normalized", "alert_sources",
-        "rejected_rows", "schema_versions",
+        "alerts_flat", "collection_runs", "collection_sessions",
+        "history_export_parts", "alert_sources", "rejected_rows", "schema_versions",
     }
     assert expected <= tables
+    # The simplified scope must NOT create these tables.
+    assert "alerts_normalized" not in tables
+    assert "alerts_raw" not in tables
+    assert "collection_days" not in tables
     conn.close()
 
 

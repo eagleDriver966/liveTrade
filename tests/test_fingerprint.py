@@ -1,4 +1,4 @@
-"""Tests: versioned fingerprints, fallbacks, page fingerprint."""
+"""Tests: stable fingerprints, fallback version, page fingerprint."""
 
 from __future__ import annotations
 
@@ -20,12 +20,10 @@ def _fields(**over):
         "alert_timestamp": datetime(2026, 2, 2, 10, 0, tzinfo=NY),
         "alert_type": "High",
         "symbol": "AAA",
-        "price_norm": 10.5,
-        "count_norm": 3,
-        "volume_norm": 1000.0,
-        "source_session": "NHP",
-        "panel_role": "NHP",
-        "event_id": "evt-1",
+        "price": 10.5,
+        "alert_count": 3,
+        "volume": 1000.0,
+        "session": "NHP",
     }
     base.update(over)
     return base
@@ -48,27 +46,30 @@ def test_lineage_excluded():
     assert a.value == b.value
 
 
-def test_version_fallback_without_event_id():
-    f = _fields(event_id=None)
-    assert choose_version(f) == "fp-v1a"
-    fp = compute_fingerprint(f)
-    assert fp.version == "fp-v1a"
+def test_uses_more_than_symbol_type_time_price():
+    # Rows identical in symbol/type/time/price but differing in count/volume
+    # must fingerprint differently (we use the richer field set).
+    a = compute_fingerprint(_fields(alert_count=3, volume=1000.0))
+    b = compute_fingerprint(_fields(alert_count=9, volume=5000.0))
+    assert a.value != b.value
 
 
 def test_version_fallback_without_volume_count():
-    f = _fields(event_id=None, volume_norm=None, count_norm=None)
-    assert choose_version(f) == "fp-v1b"
+    f = _fields(volume=None, alert_count=None)
+    assert choose_version(f) == "fp-v1-lite"
+    fp = compute_fingerprint(f)
+    assert fp.version == "fp-v1-lite"
 
 
 def test_different_session_differs():
-    a = compute_fingerprint(_fields(source_session="NHP", panel_role="NHP"))
-    b = compute_fingerprint(_fields(source_session="HPRE", panel_role="HPRE"))
+    a = compute_fingerprint(_fields(session="NHP"))
+    b = compute_fingerprint(_fields(session="HPRE"))
     assert a.value != b.value
 
 
 def test_price_change_differs():
-    a = compute_fingerprint(_fields(price_norm=10.5))
-    b = compute_fingerprint(_fields(price_norm=10.6))
+    a = compute_fingerprint(_fields(price=10.5))
+    b = compute_fingerprint(_fields(price=10.6))
     assert a.value != b.value
 
 
