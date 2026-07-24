@@ -47,7 +47,8 @@ def cli(argv: list[str] | None = None) -> int:
 
     sub.add_parser("migrate", help="Backup + migrate the database")
     sub.add_parser("backend-status", help="Show OS + backend status (REAL/MOCK/ERROR)")
-    sub.add_parser("gates", help="Show verification gate status")
+    sub.add_parser("eligibility", help="Show the HARD production-eligibility report")
+    sub.add_parser("gates", help="Show real + mock gate status (separate namespaces)")
     sub.add_parser("diagnostics", help="Run diagnostic discovery")
 
     p_assign = sub.add_parser("assign", help="Assign a panel position to a session")
@@ -104,6 +105,11 @@ def cli(argv: list[str] | None = None) -> int:
         print(status["label"])
         _print(status)
         return 0 if status["code"] != "ERROR" else 4
+
+    if args.command == "eligibility":
+        result = app.production_eligibility()
+        print("\n".join(result["report"]))
+        return 0 if result["eligible"] else 5
 
     if args.command == "gates":
         _print(app.gates_status())
@@ -255,15 +261,22 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
             ("Verify Panels", self.on_verify_panels),
             ("Test One Page Export", self.on_test_one_page),
             ("Test One More Transition", self.on_test_one_more),
+            ("Production Eligibility", self.on_eligibility),
             ("View Collection Status", self.on_status),
             ("Collect Single Date", self.on_collect_single),
             ("Collect Date Range", self.on_collect_range),
             ("Resume Incomplete Run", self.on_resume_run),
         ]
+        # Collection controls are disabled entirely under the mock backend.
+        self._collect_labels = {"Collect Single Date", "Collect Date Range",
+                                "Resume Incomplete Run"}
+        self._collect_buttons = []
         for i, (label, cmd) in enumerate(buttons):
-            ttk.Button(toolbar, text=label, command=cmd).grid(
-                row=i // 3, column=i % 3, padx=3, pady=3, sticky="ew"
-            )
+            btn = ttk.Button(toolbar, text=label, command=cmd)
+            btn.grid(row=i // 3, column=i % 3, padx=3, pady=3, sticky="ew")
+            if label in self._collect_labels and self.app.backend_name.lower() == "mock":
+                btn.state(["disabled"])
+                self._collect_buttons.append(btn)
 
         control_bar = ttk.Frame(self.root)
         control_bar.pack(side=tk.TOP, fill=tk.X, padx=6)
@@ -440,11 +453,21 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
             self.progress_queue.put(ProgressEvent("test_one_more", "one-more result", res))
         self._start_worker(task)
 
+    def on_eligibility(self):
+        result = self.app.production_eligibility()
+        self._append("--- PRODUCTION ELIGIBILITY ---")
+        for line in result["report"]:
+            self._append("  " + line)
+
     def on_status(self):
+        if self.app.backend_name.lower() == "mock":
+            self._append("MOCK TEST RESULTS ONLY - production controls are disabled.")
         def task(conn):
             # View Collection Status includes row-count reconciliation.
             res = self.app.verify(conn)
-            self.progress_queue.put(ProgressEvent("status", "status", res))
+            gs = self.app.gates_status()
+            self.progress_queue.put(ProgressEvent("status", "status",
+                                                  {"verify": res, "gates": gs}))
         self._start_worker(task)
 
     def on_pause(self):
