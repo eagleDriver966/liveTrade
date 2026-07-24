@@ -15,6 +15,7 @@ Design rules honoured:
 from __future__ import annotations
 
 import os
+import platform
 import time
 from datetime import date, datetime
 from typing import Any
@@ -28,17 +29,26 @@ from .base import (
 )
 
 
+def _require_windows() -> None:
+    os_name = platform.system()
+    if os_name != "Windows":
+        raise AutomationError(
+            f"Real Trade Ideas backend requires Windows; detected OS '{os_name}'. "
+            "Use the 'mock' backend for tests, or run on the Windows machine."
+        )
+
+
 def _require_pywinauto():
+    _require_windows()
     try:
         import pywinauto  # noqa: F401
         from pywinauto import Application, Desktop  # noqa: F401
         from pywinauto.keyboard import send_keys  # noqa: F401
     except Exception as exc:  # pragma: no cover - Windows-only
         raise AutomationError(
-            "pywinauto is required for the real Trade Ideas backend and is only "
-            "available on Windows. Install with `pip install pywinauto` on the "
-            "Windows collection machine, or use the 'mock' backend for tests. "
-            f"Import error: {exc}"
+            "pywinauto (and pywin32/comtypes) must be installed for the real "
+            "Trade Ideas backend. Install with `pip install -r requirements.txt` "
+            f"on the Windows collection machine. Import error: {exc}"
         ) from exc
     return pywinauto
 
@@ -65,11 +75,24 @@ class PywinautoBackend(AutomationBackend):
     def connect(self) -> None:  # pragma: no cover - Windows-only
         pywinauto = _require_pywinauto()
         from pywinauto import Application
+        from pywinauto.findwindows import ElementNotFoundError
 
         title_re = self.config.get("app_title_re", ".*Trade Ideas.*")
         backend = self.config.get("ui_backend", "uia")
-        self.app = Application(backend=backend).connect(title_re=title_re, timeout=30)
-        self.main = self.app.top_window()
+        try:
+            self.app = Application(backend=backend).connect(
+                title_re=title_re, timeout=30
+            )
+            self.main = self.app.top_window()
+        except ElementNotFoundError as exc:
+            raise AutomationError(
+                "Trade Ideas main window was not found. Is Trade Ideas open and "
+                f"logged in? (looked for a window matching {title_re!r}). {exc}"
+            ) from exc
+        except Exception as exc:
+            raise AutomationError(
+                f"Could not connect to Trade Ideas ({type(exc).__name__}): {exc}"
+            ) from exc
 
     def ensure_foreground(self) -> None:  # pragma: no cover - Windows-only
         if self.main is None:
@@ -313,9 +336,47 @@ class PywinautoBackend(AutomationBackend):
         except Exception:
             return None
 
+    def _menu_hierarchy(self) -> Any:  # pragma: no cover - Windows-only
+        try:
+            menu = self.main.menu()
+            if menu is None:
+                return None
+
+            def walk(items):
+                out = []
+                for it in items:
+                    entry = {"text": it.text(), "index": it.index()}
+                    try:
+                        sub = it.sub_menu()
+                        if sub:
+                            entry["items"] = walk(sub.items())
+                    except Exception:
+                        pass
+                    out.append(entry)
+                return out
+
+            return walk(menu.items())
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def discover(self) -> dict[str, Any]:  # pragma: no cover - Windows-only
+        """Full diagnostic snapshot for the selector report.
+
+        Best-effort on the target machine; categories that cannot be resolved
+        automatically are left for manual confirmation (see
+        docs/UNRESOLVED_SELECTORS.md).
+        """
         self.ensure_foreground()
-        report: dict[str, Any] = {"process": self.process_info()}
+        report: dict[str, Any] = {
+            "process": self.process_info(),
+            "main_window": {
+                "title": self.main.window_text(),
+                "rectangle": str(self.main.rectangle()),
+                "class_name": self.main.element_info.class_name,
+            },
+        }
+
+        # All accessible child controls.
         try:
             report["controls"] = [
                 {
@@ -329,8 +390,39 @@ class PywinautoBackend(AutomationBackend):
             ]
         except Exception as exc:
             report["controls_error"] = str(exc)
+
+        # Menu hierarchy (File menu, panel-selection menu live here).
+        report["menu_hierarchy"] = self._menu_hierarchy()
+
+        # Panel / tab positions.
         try:
             report["panels"] = [p.to_dict() for p in self.list_panels()]
         except Exception as exc:
             report["panels_error"] = str(exc)
+
+        # Named selector categories the operator must confirm.  Configured values
+        # (if any) are echoed; missing ones are flagged for manual discovery.
+        sel = self._selectors
+        report["selectors"] = {
+            "panel_selection_menu": sel.get("panel_menu_path"),
+            "history_command": sel.get("history_menu_path"),
+            "history_date_controls": sel.get("history_date_edit"),
+            "history_grid": sel.get("history_grid"),
+            "more_command": sel.get("more_button"),
+            "no_more_history_text": sel.get("no_more_history_text"),
+            "file_menu": sel.get("file_menu_path", "File"),
+            "save_contents_command": sel.get("save_contents_menu_path"),
+        }
+        report["unresolved_selectors"] = [
+            key for key, val in report["selectors"].items() if not val
+        ]
+
+        # Dialogs (present only when triggered; report expected identifiers).
+        report["dialogs"] = {
+            "save_as": {"expected_title_re": "Save As",
+                        "filename_edit": "control_type=Edit",
+                        "save_button": "title=Save"},
+            "overwrite_confirmation": {"expected_title_re": "Confirm Save As",
+                                       "cancel_button": "title=No"},
+        }
         return report

@@ -28,7 +28,7 @@ import threading
 from datetime import date, datetime
 from typing import Any
 
-from hdb.app import HdbApp, ProductionBlockedError
+from hdb.app import GatesNotPassedError, HdbApp, ProductionBlockedError
 from hdb.control import CollectionControl, ProgressEvent
 
 
@@ -46,11 +46,28 @@ def cli(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("migrate", help="Backup + migrate the database")
+    sub.add_parser("backend-status", help="Show OS + backend status (REAL/MOCK/ERROR)")
+    sub.add_parser("gates", help="Show verification gate status")
     sub.add_parser("diagnostics", help="Run diagnostic discovery")
 
     p_assign = sub.add_parser("assign", help="Assign a panel position to a session")
     p_assign.add_argument("session", choices=["HPRE", "NHP", "HPOST"])
     p_assign.add_argument("position", type=int)
+
+    p_vp = sub.add_parser("verify-panel", help="Activate + verify an assigned panel")
+    p_vp.add_argument("session", choices=["HPRE", "NHP", "HPOST"])
+    p_vp.add_argument("--confirm", action="store_true",
+                      help="Record the panel as visually confirmed")
+
+    p_t1 = sub.add_parser("test-one-page", help="Export+parse ONE page (no More, no import)")
+    p_t1.add_argument("date", help="YYYY-MM-DD")
+    p_t1.add_argument("session", choices=["HPRE", "NHP", "HPOST"])
+
+    sub.add_parser("approve-page", help="Import the last validated one-page export")
+
+    p_tm = sub.add_parser("test-one-more", help="One More transition -> part_002 (no auto-continue)")
+    p_tm.add_argument("date", help="YYYY-MM-DD")
+    p_tm.add_argument("session", choices=["HPRE", "NHP", "HPOST"])
 
     p_cd = sub.add_parser("collect-date", help="Collect one trading date (3 sessions)")
     p_cd.add_argument("date", help="YYYY-MM-DD")
@@ -82,8 +99,38 @@ def cli(argv: list[str] | None = None) -> int:
         _print(app.migrate())
         return 0
 
+    if args.command == "backend-status":
+        status = app.backend_status()
+        print(status["label"])
+        _print(status)
+        return 0 if status["code"] != "ERROR" else 4
+
+    if args.command == "gates":
+        _print(app.gates_status())
+        return 0
+
     if args.command == "diagnostics":
         _print(app.run_diagnostics())
+        return 0
+
+    if args.command == "verify-panel":
+        _print(app.verify_panel(args.session, confirm=args.confirm))
+        return 0
+
+    if args.command == "test-one-page":
+        try:
+            _print(app.test_one_page(args.session, date.fromisoformat(args.date)))
+        except (ProductionBlockedError, GatesNotPassedError) as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 3
+        return 0
+
+    if args.command == "test-one-more":
+        try:
+            _print(app.test_one_more(args.session, date.fromisoformat(args.date)))
+        except (ProductionBlockedError, GatesNotPassedError) as exc:
+            print(f"BLOCKED: {exc}", file=sys.stderr)
+            return 3
         return 0
 
     if args.command == "assign":
@@ -117,6 +164,8 @@ def cli(argv: list[str] | None = None) -> int:
             _print(app.collect_date_range(conn, newest=newest, boundary=boundary))
         elif args.command == "resume-run":
             _print(app.resume_incomplete(conn))
+        elif args.command == "approve-page":
+            _print(app.approve_and_import_page(conn))
         elif args.command == "import":
             _print(app.import_existing(conn))
         elif args.command == "verify":
@@ -129,7 +178,7 @@ def cli(argv: list[str] | None = None) -> int:
             _print(app.verify(conn))
         else:  # pragma: no cover
             parser.error(f"Unknown command {args.command}")
-    except ProductionBlockedError as exc:
+    except (ProductionBlockedError, GatesNotPassedError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 3
     finally:
@@ -174,20 +223,42 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
         self.root.geometry("900x640")
 
         self._build_widgets(scrolledtext)
+        self._refresh_banner()
         self._poll_queue()
+
+    def _refresh_banner(self):
+        try:
+            status = self.app.backend_status(probe=True)
+        except Exception as exc:
+            status = {"label": "WINDOWS BACKEND ERROR", "code": "ERROR",
+                      "message": str(exc)}
+        colors = {"REAL_READY": "#1b7a1b", "MOCK": "#b8860b", "ERROR": "#a11"}
+        self.banner.config(text=status["label"],
+                           bg=colors.get(status["code"], "#666"))
+        self._append(f"[backend] {status['label']} - {status.get('message','')}")
 
     def _build_widgets(self, scrolledtext):
         tk, ttk = self.tk, self.ttk
+
+        # Prominent backend-status banner.
+        self.banner = tk.Label(self.root, text="(checking backend...)",
+                               font=("TkDefaultFont", 12, "bold"),
+                               fg="white", bg="#666", pady=6)
+        self.banner.pack(side=tk.TOP, fill=tk.X)
+
         toolbar = ttk.Frame(self.root)
         toolbar.pack(side=tk.TOP, fill=tk.X, padx=6, pady=6)
 
         buttons = [
             ("Diagnostic Setup", self.on_diagnostics),
             ("Assign Panel Positions", self.on_assign),
+            ("Verify Panels", self.on_verify_panels),
+            ("Test One Page Export", self.on_test_one_page),
+            ("Test One More Transition", self.on_test_one_more),
+            ("View Collection Status", self.on_status),
             ("Collect Single Date", self.on_collect_single),
             ("Collect Date Range", self.on_collect_range),
             ("Resume Incomplete Run", self.on_resume_run),
-            ("View Collection Status", self.on_status),
         ]
         for i, (label, cmd) in enumerate(buttons):
             ttk.Button(toolbar, text=label, command=cmd).grid(
@@ -316,6 +387,57 @@ class TradeIdeasGUI:  # pragma: no cover - requires a display
         def task(conn):
             res = self.app.resume_incomplete(conn, self.control)
             self.progress_queue.put(ProgressEvent("resume", "resume complete", res))
+        self._start_worker(task)
+
+    def on_verify_panels(self):
+        for session in ("HPRE", "NHP", "HPOST"):
+            try:
+                res = self.app.verify_panel(session, confirm=False)
+            except Exception as exc:
+                self._append(f"[verify-panel] {session} error: {exc}")
+                continue
+            if not res.get("ok"):
+                self._append(f"[verify-panel] {session}: {res.get('error')}")
+                continue
+            confirmed = self.messagebox.askyesno(
+                "Verify Panel",
+                f"{session} activated at tab position {res['position']}.\n"
+                f"Screenshot: {res.get('screenshot')}\n\n"
+                f"Is the correct {session} panel visibly active?")
+            if confirmed:
+                self.app.verify_panel(session, confirm=True)
+                self._append(f"[verify-panel] {session}: CONFIRMED (pos {res['position']})")
+            else:
+                self._append(f"[verify-panel] {session}: not confirmed")
+
+    def on_test_one_page(self):
+        if self._blocked_if_mock():
+            return
+        d = self.simpledialog.askstring("Test One Page", "Date (YYYY-MM-DD):")
+        if not d:
+            return
+        session = self.simpledialog.askstring("Test One Page", "Session (HPRE/NHP/HPOST):")
+        if not session:
+            return
+
+        def task(conn):
+            res = self.app.test_one_page(session, date.fromisoformat(d))
+            self.progress_queue.put(ProgressEvent("test_one_page", "one-page result", res))
+        self._start_worker(task)
+
+    def on_test_one_more(self):
+        if self._blocked_if_mock():
+            return
+        d = self.simpledialog.askstring("Test One More", "Date (YYYY-MM-DD):")
+        if not d:
+            return
+        session = self.simpledialog.askstring("Test One More", "Session (HPRE/NHP/HPOST):")
+        if not session:
+            return
+
+        def task(conn):
+            res = self.app.test_one_more(session, date.fromisoformat(d))
+            self.progress_queue.put(ProgressEvent("test_one_more", "one-more result", res))
         self._start_worker(task)
 
     def on_status(self):
