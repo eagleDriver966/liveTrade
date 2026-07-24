@@ -59,18 +59,45 @@ database and export directory** (suffixes `.mocktest.db` / `_mocktest`) so mock
 data never touches production. Set `automation.backend = "pywinauto"` on the
 Windows machine to collect.
 
-## Verification gates (collection stays blocked until all pass)
+## Hard production-safety gate (independent of test gates)
 
 `Collect Single Date`, `Collect Date Range` and `Resume Incomplete Run` are
-blocked until every gate passes:
+blocked by a **hard, live** production-eligibility check that is independent of
+the diagnostic/test gates. All 13 conditions must hold:
 
-`real_backend_initialized`, `panels_assigned`, `panels_verified`,
-`history_selector_verified`, `save_contents_verified`, `save_as_verified`,
-`one_page_exported`, `one_more_verified`, `one_session_reconciled`.
+1. `operating_system == "Windows"`
+2. `backend_type == "windows_real"`
+3. `real_backend_connected == true` (live pywinauto connection this execution)
+4. Trade Ideas process ID detected
+5. Trade Ideas main-window handle verified
+6. `mock_mode == false`
+7. production database path is not a mock/test path
+8. production export directory is not a mock/test directory
+9. panel assignments discovered using the current real Trade Ideas process
+10. all panel assignments visually confirmed in the current configuration version
+11. one real page export passed
+12. one real More transition passed
+13. one full real session reconciled
 
 ```bash
-python Hdb.py --config config.json gates          # see gate status
+python Hdb.py --config config.json eligibility    # full report + PASS/FAIL per condition
+python Hdb.py --config config.json gates          # real + mock gate namespaces (separate)
 ```
+
+### Real vs mock gates (strictly separated)
+
+Real gates (`real_backend_initialized`, `real_panel_assignments_verified`,
+`real_page_export_verified`, `real_more_transition_verified`,
+`real_session_reconciled`) can be set only while a genuine real connection is
+active, are tagged with the live process signature + configuration version, and
+are invalidated whenever panel assignments change.
+
+Mock gates (`mock_backend_initialized`, `mock_panels_verified`,
+`mock_page_export_verified`, `mock_more_transition_verified`,
+`mock_session_reconciled`) are **TEST ONLY** and never satisfy any production
+condition. A mock backend can never set, satisfy, emulate or persist a real
+gate. No sequence of mock actions unlocks production controls; under mock the
+status reads **MOCK TEST RESULTS ONLY** and the Collect controls are disabled.
 
 ### Gated diagnostic sequence (run in order on Windows)
 
@@ -84,8 +111,9 @@ python Hdb.py --config config.json verify-panel NHP --confirm  # activate + visu
 python Hdb.py --config config.json test-one-page 2026-02-02 NHP  # export ONE page, no More, no import
 python Hdb.py --config config.json approve-page                 # import that page after you review it
 python Hdb.py --config config.json test-one-more 2026-02-02 NHP  # ONE More -> part_002, then stop
-# one full session reconcile (later objective) sets the final gate; only then
-# are Collect Single/Date Range/Resume unblocked.
+python Hdb.py --config config.json eligibility                  # confirm all 13 conditions PASS
+# one full session reconcile (later objective) sets the final gate; only when
+# `eligibility` reports YES are Collect Single/Date Range/Resume unblocked.
 ```
 
 ## CLI

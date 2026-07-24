@@ -43,6 +43,25 @@ Windows) and a deterministic mock backend used by the tests.
   export directory; production collection and the real diagnostic exports are
   blocked when `backend=mock`.
 
+### Hard production-safety gate (independent of test gates)
+
+* `hdb/production_gate.py` evaluates **13 live conditions** (OS, backend type,
+  live pywinauto connection, Trade Ideas PID, main-window handle, mock flag,
+  non-mock DB/export paths, and real-gate evidence tied to the current process +
+  config version) and prints a full PASS/FAIL evidence report ending in
+  `Production collection eligible: YES/NO`.
+* Gates are split into strictly separated namespaces (`hdb/gates.py`): `real_*`
+  gates are set only via `set_real_gate` (requires a live process signature and
+  the current config version; invalidated on any panel reassignment); `mock_*`
+  gates are TEST ONLY and can never satisfy a production condition.
+* A mock backend never sets, satisfies, emulates or persists any `real_*` gate;
+  under mock the status reads `MOCK TEST RESULTS ONLY` and Collect controls are
+  disabled. Regression tests prove no sequence of mock actions enables
+  production and that the real production database is never touched by mock.
+* `real_backend_initialized` is set only when a genuine live pywinauto
+  connection to a running Trade Ideas process is established during the current
+  execution (ephemeral, not persisted across runs).
+
 ## Key design decisions
 
 * **Export-before-More is enforced in code.** `collect_session` will not call

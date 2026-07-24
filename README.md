@@ -101,8 +101,19 @@ python Hdb.py --config config.json gates                        # see remaining 
 python Hdb.py --config config.json gui                          # or use the GUI
 ```
 
-`Collect Single Date` / `Collect Date Range` / `Resume Incomplete Run` remain
-blocked until all gates (including one full reconciled session) pass. See
+`Collect Single Date` / `Collect Date Range` / `Resume Incomplete Run` are
+blocked by a **hard, live production-safety gate** (13 conditions) that is
+independent of the diagnostic/test gates. Check it any time:
+
+```bash
+python Hdb.py --config config.json eligibility   # 13 conditions + PASS/FAIL + YES/NO
+```
+
+Real gates (`real_*`) can be set only under a genuine live connection and are
+tagged with the Trade Ideas process signature + config version; mock gates
+(`mock_*`) are strictly separate and can never satisfy production. Under the mock
+backend the status reads `MOCK TEST RESULTS ONLY` and Collect controls are
+disabled. See [`docs/WINDOWS_SETUP.md`](docs/WINDOWS_SETUP.md),
 [`docs/INSTALLATION.md`](docs/INSTALLATION.md) and
 [`docs/OPERATING.md`](docs/OPERATING.md).
 
@@ -126,6 +137,7 @@ python examples/demo_collection.py   # full pipeline demo (no Windows needed)
 
 ## Documentation
 
+* [Windows setup & launch](docs/WINDOWS_SETUP.md)
 * [Installation](docs/INSTALLATION.md)
 * [Operating guide](docs/OPERATING.md)
 * [Troubleshooting](docs/TROUBLESHOOTING.md)

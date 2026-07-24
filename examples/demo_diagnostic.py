@@ -80,15 +80,16 @@ def main() -> int:
     print(f"   first oldest={r2.first_part.get('oldest_timestamp')} -> "
           f"second oldest={r2.second_part.get('oldest_timestamp')}")
 
-    print("\n4. GATES (simulated after successful diagnostics)")
-    for g in ("real_backend_initialized", "panels_assigned", "panels_verified",
-              "history_selector_verified", "save_contents_verified",
-              "save_as_verified", "one_page_exported", "one_more_verified"):
-        gates.set_gate(cfg, g, save=False)
-    print(f"   passed so far: {[k for k in gates.GATE_KEYS if gates.gate_passed(cfg, k)]}")
-    print(f"   still blocking collection: {gates.missing_gates(cfg)}")
+    print("\n4. MOCK GATES (these are TEST-ONLY and never satisfy production)")
+    for g in gates.MOCK_GATE_KEYS:
+        gates.set_mock_gate(cfg, g, save=False)
+    print(f"   mock gates set: {[k for k in gates.MOCK_GATE_KEYS if gates.mock_gate_passed(cfg, k)]}")
+    print(f"   real gates set: "
+          f"{[k for k in gates.REAL_GATE_KEYS if gates.real_gate_entry(cfg, k)]} (must be empty)")
+    print("   NOTE: MOCK TEST RESULTS ONLY - production controls remain disabled.")
 
-    ok = r1.ok and r2.ok and r2.moved_backward
+    ok = (r1.ok and r2.ok and r2.moved_backward
+          and not any(gates.real_gate_entry(cfg, k) for k in gates.REAL_GATE_KEYS))
     print("\nRESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
